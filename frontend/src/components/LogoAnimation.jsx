@@ -1,37 +1,47 @@
 // src/components/LogoAnimation.jsx
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import * as faceapi from 'face-api.js';
+import { useRecognition } from '../contexts/RecognitionContext'; // Context Hook import
 
 const LogoAnimation = () => {
+  // Context에서 상태와 상태 업데이트 함수를 가져옵니다.
+  // TTS 관련 상태 (hasSpokenWelcome, hasSpokenRecognition, hasSpokenElderly)는 제거되었습니다.
+  const {
+    recognitionDone, setRecognitionDone,
+    visitors, setVisitors,
+    hasElderlyVisitor, setHasElderlyVisitor,
+    lastDetected, setLastDetected,
+    resetRecognitionState // 초기화 함수도 가져옴
+  } = useRecognition();
+
   const videoRef = useRef();
   const canvasRef = useRef();
   const finalLogoTop = useRef('50%'); 
 
   const DEBUG_MODE = false; 
 
+  // 이 상태들은 LogoAnimation 내부에서만 관리되는 UI/애니메이션 관련 상태입니다.
+  // Context로 옮기지 않은 상태들입니다.
   const [isShrunk, setIsShrunk] = useState(false);
   const [stopTracking, setStopTracking] = useState(false); 
   const [hasAnimatedOnce, setHasAnimatedOnce] = useState(false); 
   const [currentDistance, setCurrentDistance] = useState(null); 
-
-  const [visitors, setVisitors] = useState([]); 
-  const [showDebugInfo, setShowDebugInfo] = useState(false); 
-  const [lastDetected, setLastDetected] = useState(null); 
-  const [recognitionDone, setRecognitionDone] = useState(false); 
-  
-  const [hasElderlyVisitor, setHasElderlyVisitor] = useState(false); 
+  const [showDebugInfo, setShowDebugInfo] = useState(false); // DEBUG_MODE에 따라 로컬로 유지
 
   const [showWelcomeSvg, setShowWelcomeSvg] = useState(false); 
   const [welcomeSvgOpacity, setWelcomeSvgOpacity] = useState(0); 
   
-  // --- 새로 추가된 상태: "고객님..." 멘트 표시 여부 제어 ---
   const [showRecognitionText, setShowRecognitionText] = useState(false);
+
+  // TTS 메시지 배열 및 speakMessage 함수는 더 이상 필요 없음
+  // const welcomeMessages = ["안녕하세요!", "반가워요!", "어서오세요!"];
+  // const speakMessage = useCallback(async (message, isElderly) => { ... }, []);
 
   // --- 1. 모델 로딩 및 웹캠 설정 ---
   useEffect(() => {
     const loadModelsAndStartVideo = async () => {
-      const MODEL_URL = '/models';
+      const MODEL_URL = '/models'; // public/models 폴더에 모델 파일들이 있어야 함
       try {
         await Promise.all([
           faceapi.nets.tinyFaceDetector.loadFromUri(MODEL_URL),
@@ -150,7 +160,7 @@ const LogoAnimation = () => {
   }, [currentDistance, hasAnimatedOnce, isShrunk]);
 
 
-  // --- 4. 애니메이션 발동 후 사용자 감지 및 저장 ---
+  // --- 4. 애니메이션 발동 후 사용자 감지 및 저장 (Context 상태 업데이트) ---
   useEffect(() => {
     if (isShrunk && !recognitionDone) {
       const video = videoRef.current;
@@ -186,55 +196,57 @@ const LogoAnimation = () => {
             });
           });
 
-          setHasElderlyVisitor(foundElderly);
-          setLastDetected(detectedVisitors[0] || null);
-          setVisitors(detectedVisitors);
+          setHasElderlyVisitor(foundElderly); // Context 상태 업데이트
+          setLastDetected(detectedVisitors[0] || null); // Context 상태 업데이트
+          setVisitors(detectedVisitors); // Context 상태 업데이트
         } else {
-          setHasElderlyVisitor(false);
-          setVisitors([]);
-          setLastDetected({ age: '감지 실패', gender: '-', expressions: 'N/A' });
+          setHasElderlyVisitor(false); // Context 상태 업데이트
+          setVisitors([]); // Context 상태 업데이트
+          setLastDetected({ age: '감지 실패', gender: '-', expressions: 'N/A' }); // Context 상태 업데이트
         }
 
-        setRecognitionDone(true);
+        setRecognitionDone(true); // Context 상태 업데이트
         if (DEBUG_MODE) setShowDebugInfo(true); 
       };
 
       setTimeout(detectAndSaveVisitorsWithExpressions, 500);
     }
-  }, [isShrunk, recognitionDone, DEBUG_MODE]);
+  }, [isShrunk, recognitionDone, DEBUG_MODE, setRecognitionDone, setHasElderlyVisitor, setLastDetected, setVisitors]);
 
-  // --- recognitionDone이 true가 되면 "반가워요!" SVG를 DOM에 표시하고, 그 후 opacity 애니메이션 시작 ---
+
+  // --- recognitionDone이 true가 되면 "반가워요!" SVG 및 멘트 표시 ---
   useEffect(() => {
-    let timer1, timer2;
+    let timer1, timer2; 
+
     if (recognitionDone) {
-      setShowWelcomeSvg(true); // 1. SVG를 일단 DOM에 추가 (초기 opacity는 0)
+      setShowWelcomeSvg(true);
 
       timer1 = setTimeout(() => {
-        setWelcomeSvgOpacity(1); // 2. DOM에 추가된 후 50ms 딜레이 후 opacity를 1로 변경
-      }, 30); 
+        setWelcomeSvgOpacity(1); 
+      }, 50); 
 
-      // --- "반가워요!" SVG 애니메이션이 끝난 후 "고객님..." 멘트 표시 ---
-      const welcomeSvgAnimationDuration = 1500; // welcomeSvgStyle에 설정된 opacity transition 시간 (1.5s)
-      const totalDelayForText = 50 + welcomeSvgAnimationDuration; // SVG opacity 시작 딜레이 + SVG 애니메이션 시간
+      const welcomeSvgAnimationDuration = 1500; 
+      const totalDelayForText = 50 + welcomeSvgAnimationDuration; 
 
       timer2 = setTimeout(() => {
-        setShowRecognitionText(true); // SVG 애니메이션 완료 후 멘트 표시
+        setShowRecognitionText(true); 
       }, totalDelayForText);
-
+      
       return () => {
         clearTimeout(timer1);
         clearTimeout(timer2);
       }; 
     } else {
-      setWelcomeSvgOpacity(0); // recognitionDone이 false면 opacity를 0으로 먼저 설정 (숨김 효과)
-      setShowRecognitionText(false); // 멘트도 숨김
+      setWelcomeSvgOpacity(0); 
+      setShowRecognitionText(false); 
 
       timer1 = setTimeout(() => {
-          setShowWelcomeSvg(false); // 그 다음 DOM에서 제거 (디스플레이 none과 유사)
-      }, 700); // opacity transition 시간(1.5s)보다 짧게 설정하여 사라지는 애니메이션이 끝나기 전에 제거
+          setShowWelcomeSvg(false); 
+      }, 700); 
+      
       return () => clearTimeout(timer1);
     }
-  }, [recognitionDone]);
+  }, [recognitionDone]); 
 
   // 얼굴 박스 너비로 거리 추정 함수
   const calculateDistance = (boxWidth) => {
@@ -252,7 +264,7 @@ const LogoAnimation = () => {
     }
   }, [stopTracking]);
 
-  // 'R' 키를 눌러 초기화하는 기능
+  // --- 'R' 키 초기화 및 클린업 로직 (Context의 reset 함수 호출) ---
   useEffect(() => {
     const handleKeyPress = (event) => {
       if (event.key === 'r' || event.key === 'R') {
@@ -260,15 +272,13 @@ const LogoAnimation = () => {
         setHasAnimatedOnce(false);
         setStopTracking(false);
         setCurrentDistance(null);
-        setRecognitionDone(false);
-        setShowDebugInfo(false);
-        setLastDetected(null);
-        setVisitors([]);
-        setHasElderlyVisitor(false);
         finalLogoTop.current = '50%'; 
         setWelcomeSvgOpacity(0); 
         setShowWelcomeSvg(false); 
-        setShowRecognitionText(false); // --- 초기화 시 멘트도 숨김 ---
+        setShowRecognitionText(false); 
+        
+        // --- Context의 초기화 함수 호출 ---
+        resetRecognitionState(); 
       }
     };
 
@@ -277,9 +287,9 @@ const LogoAnimation = () => {
     return () => {
       window.removeEventListener('keydown', handleKeyPress);
     };
-  }, []);
+  }, [resetRecognitionState]); // resetRecognitionState를 의존성 배열에 추가
 
-  // 로고 스타일 계산
+  // --- 로고 스타일 계산 ---
   const logoStyle = {
     position: 'absolute', 
     left: '50%',
@@ -292,7 +302,7 @@ const LogoAnimation = () => {
     filter: 'drop-shadow(5px 5px 10px rgba(0, 0, 0, 0.3))'
   };
 
-  // "고객님의 시선과 움직임을 인식하고 있어요" 멘트 스타일
+  // --- "고객님의 시선과 움직임을 인식하고 있어요" 멘트 스타일 ---
   const recognitionTextStyle = {
     color: 'white',
     fontSize: hasElderlyVisitor ? '40px' : '25px',
@@ -300,10 +310,9 @@ const LogoAnimation = () => {
     whiteSpace: 'pre-wrap', 
     textAlign: 'center',
     lineHeight: hasElderlyVisitor ? '1.5' : '1.5', 
-    // opacity와 transition은 외부 div에서 제어하므로 여기서는 제거
   };
 
-  // "반가워요!.svg" 이미지 스타일
+  // --- "반가워요!.svg" 이미지 스타일 ---
   const welcomeSvgStyle = {
     position: 'absolute', 
     top: '50%', 
@@ -313,10 +322,11 @@ const LogoAnimation = () => {
     maxWidth: '500px', 
     height: 'auto', 
     opacity: welcomeSvgOpacity, 
-    transition: 'opacity 1.5s ease-in, top 0.7s ease-in-out', // opacity 트랜지션 시간 1.5s
+    transition: 'opacity 1.5s ease-in, top 0.7s ease-in-out', 
     zIndex: 100, 
   };
 
+  // --- 컴포넌트 렌더링 부분 ---
   return (
     <div style={{ padding: '40px', textAlign: 'center', position: 'relative', width: '100vw', height: '100vh', display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', overflow: 'hidden' }}>
 
@@ -373,7 +383,7 @@ const LogoAnimation = () => {
       )}
 
       {/* "고객님의 시선과 움직임을 인식하고 있어요" 멘트 (화면 하단에 고정) */}
-      {showRecognitionText && ( // --- showRecognitionText가 true일 때 렌더링 ---
+      {showRecognitionText && ( 
         <div style={{
           position: 'fixed', 
           bottom: '12vh', 
@@ -383,8 +393,8 @@ const LogoAnimation = () => {
           maxWidth: '800px', 
           textAlign: 'center',
           zIndex: 150,
-          opacity: showRecognitionText ? 1 : 0, // --- showRecognitionText에 따라 opacity 제어 ---
-          transition: 'opacity 1s ease-in-out', // 멘트의 페이드인 애니메이션
+          opacity: showRecognitionText ? 1 : 0, 
+          transition: 'opacity 1s ease-in-out', 
         }}>
           <p style={recognitionTextStyle}>
             {hasElderlyVisitor ? '고객님의 시선과 움직임을\n인식하고 있어요' : '고객님의 시선과 움직임을 인식하고 있어요'}
