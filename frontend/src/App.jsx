@@ -47,7 +47,6 @@ const WebcamManager = () => {
   );
 };
 
-
 function App() {
   return (
     <Router>
