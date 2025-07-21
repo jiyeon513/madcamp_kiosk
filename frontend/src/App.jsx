@@ -5,7 +5,7 @@ import './styles/global.css';
 import './App.css';
 import LogoAnimation from './components/LogoAnimation';
 import { RecognitionProvider } from './contexts/RecognitionContext';
-
+import GazeDetection from "./components/GazeDetection";
 function App() {
   return (
     <Router>
