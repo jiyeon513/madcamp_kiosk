@@ -2,47 +2,66 @@
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import * as faceapi from 'face-api.js';
-import { useRecognition } from '../contexts/RecognitionContext'; // Context Hook import
+import { useRecognition } from '../contexts/RecognitionContext';
+import { useNavigate } from 'react-router-dom';
+
+const useWeather = (setWeatherInfo, setWeatherError) => {
+  useEffect(() => {
+    navigator.geolocation.getCurrentPosition(
+      async (position) => {
+        try {
+          const { latitude, longitude } = position.coords;
+          const url = `https://api.open-meteo.com/v1/forecast?latitude=${latitude}&longitude=${longitude}&current=weather_code,temperature_2m`;
+          const response = await fetch(url);
+          if (!response.ok) throw new Error('날씨 API 응답 실패');
+          const data = await response.json();
+          setWeatherInfo(data.current);
+        } catch (err) {
+          setWeatherError(`날씨 정보 조회 실패: ${err.message}`);
+        }
+      },
+      () => setWeatherError("위치 정보 접근이 거부되었습니다.")
+    );
+  }, [setWeatherInfo, setWeatherError]);
+};
+
 
 const LogoAnimation = () => {
-  // Context에서 상태와 상태 업데이트 함수를 가져옵니다.
-  // TTS 관련 상태 (hasSpokenWelcome, hasSpokenRecognition, hasSpokenElderly)는 제거되었습니다.
+  const navigate = useNavigate();
+  
   const {
     recognitionDone, setRecognitionDone,
     visitors, setVisitors,
     hasElderlyVisitor, setHasElderlyVisitor,
     lastDetected, setLastDetected,
-    resetRecognitionState, // 초기화 함수도 가져옴
-    setIsElderlyMajorityGroup // 노인 과반수 그룹 상태 업데이트 함수도 가져옴
+    resetRecognitionState,
+    setIsElderlyMajorityGroup,
+    videoRef, // 컨텍스트에서 videoRef 가져오기
+    setWeatherInfo,
+    setWeatherError
   } = useRecognition();
 
-  const videoRef = useRef();
+  useWeather(setWeatherInfo, setWeatherError);
+
   const canvasRef = useRef();
   const finalLogoTop = useRef('50%'); 
 
   const DEBUG_MODE = false; 
 
-  // 이 상태들은 LogoAnimation 내부에서만 관리되는 UI/애니메이션 관련 상태입니다.
-  // Context로 옮기지 않은 상태들입니다.
   const [isShrunk, setIsShrunk] = useState(false);
   const [stopTracking, setStopTracking] = useState(false); 
   const [hasAnimatedOnce, setHasAnimatedOnce] = useState(false); 
   const [currentDistance, setCurrentDistance] = useState(null); 
-  const [showDebugInfo, setShowDebugInfo] = useState(false); // DEBUG_MODE에 따라 로컬로 유지
-
+  const [showDebugInfo, setShowDebugInfo] = useState(false);
   const [showWelcomeSvg, setShowWelcomeSvg] = useState(false); 
   const [welcomeSvgOpacity, setWelcomeSvgOpacity] = useState(0); 
-  
   const [showRecognitionText, setShowRecognitionText] = useState(false);
+  const intervalIdRef = useRef(null);
 
-  // TTS 메시지 배열 및 speakMessage 함수는 더 이상 필요 없음
-  // const welcomeMessages = ["안녕하세요!", "반가워요!", "어서오세요!"];
-  // const speakMessage = useCallback(async (message, isElderly) => { ... }, []);
-
-  // --- 1. 모델 로딩 및 웹캠 설정 ---
+  // --- 1. 모델 로딩 ---
   useEffect(() => {
-    const loadModelsAndStartVideo = async () => {
-      const MODEL_URL = '/models'; // public/models 폴더에 모델 파일들이 있어야 함
+    const loadModels = async () => {
+      const MODEL_URL = '/models';
       try {
         await Promise.all([
           faceapi.nets.tinyFaceDetector.loadFromUri(MODEL_URL),
@@ -52,51 +71,43 @@ const LogoAnimation = () => {
         ]);
         console.log("Face API 모델 로딩 완료");
       } catch (err) {
-        console.error("웹캠 접근 또는 Face API 모델 로딩 에러:", err);
-      }
-      try {
-        const stream = await navigator.mediaDevices.getUserMedia({ video: true });
-        if (videoRef.current) {
-          videoRef.current.srcObject = stream;
-        }
-      } catch (err) {
-        console.error("웹캠 스트림 가져오기 에러:", err);
+        console.error("Face API 모델 로딩 에러:", err);
       }
     };
-    loadModelsAndStartVideo();
-    return () => {
-      if (videoRef.current && videoRef.current.srcObject) {
-        videoRef.current.srcObject.getTracks().forEach(track => track.stop());
-      }
-      if (intervalIdRef.current) {
-        clearInterval(intervalIdRef.current);
-      }
-    };
+    loadModels();
   }, []);
 
-  // --- 2. 얼굴 인식 및 거리 추정 로직 (애니메이션 트리거용) ---
-  const intervalIdRef = useRef(null);
-
-  const handleVideoLoadedMetadata = () => {
+  // --- 2. 얼굴 인식 및 거리 추정 로직 시작 ---
+  const handleVideoLoadedMetadata = useCallback(() => {
     const video = videoRef.current;
     const canvas = canvasRef.current;
-    if (!video || !canvas) return;
+    if (!video || !canvas || video.videoWidth === 0) return;
 
-    const checkVideoDimensions = () => {
-      if (video.videoWidth > 0 && video.videoHeight > 0) {
-        const displaySize = { width: video.videoWidth, height: video.videoHeight };
-        faceapi.matchDimensions(canvas, displaySize);
+    const displaySize = { width: video.videoWidth, height: video.videoHeight };
+    faceapi.matchDimensions(canvas, displaySize);
 
-        if (!stopTracking) {
-          startDetectionInterval();
-        }
+    if (!stopTracking) {
+      startDetectionInterval();
+    }
+  }, [videoRef, stopTracking]); // videoRef와 stopTracking에 의존
+
+  // videoRef가 유효하고, 메타데이터가 로드되면 인식 로직 시작
+  useEffect(() => {
+    const video = videoRef.current;
+    if (video) {
+      if (video.readyState >= 1) { // 1: HAVE_METADATA
+        handleVideoLoadedMetadata();
       } else {
-        setTimeout(checkVideoDimensions, 50);
+        video.addEventListener('loadedmetadata', handleVideoLoadedMetadata);
+      }
+    }
+    return () => {
+      if (video) {
+        video.removeEventListener('loadedmetadata', handleVideoLoadedMetadata);
       }
     };
+  }, [videoRef, handleVideoLoadedMetadata]);
 
-    checkVideoDimensions();
-  };
 
   const startDetectionInterval = () => {
     if (intervalIdRef.current || stopTracking) return;
@@ -123,11 +134,13 @@ const LogoAnimation = () => {
         }
 
         const resizedDetection = faceapi.resizeResults(detection, currentDisplaySize);
-
-        const ctx = canvas.getContext('2d');
-        ctx.clearRect(0, 0, canvas.width, canvas.height);
-        faceapi.draw.drawDetections(canvas, resizedDetection);
-        faceapi.draw.drawFaceLandmarks(canvas, resizedDetection);
+        
+        if (canvasRef.current) {
+          const ctx = canvasRef.current.getContext('2d');
+          ctx.clearRect(0, 0, canvasRef.current.width, canvasRef.current.height);
+          faceapi.draw.drawDetections(canvasRef.current, resizedDetection);
+          faceapi.draw.drawFaceLandmarks(canvasRef.current, resizedDetection);
+        }
 
         const box = resizedDetection.detection.box;
         const distance = calculateDistance(box.width);
@@ -136,8 +149,10 @@ const LogoAnimation = () => {
 
       } else {
         setCurrentDistance(null);
-        const ctx = canvas.getContext('2d');
-        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        if (canvasRef.current) {
+          const ctx = canvasRef.current.getContext('2d');
+          ctx.clearRect(0, 0, canvasRef.current.width, canvasRef.current.height);
+        }
       }
     }, 100);
   };
@@ -197,21 +212,20 @@ const LogoAnimation = () => {
             });
           });
 
-          setHasElderlyVisitor(foundElderly); // Context 상태 업데이트
-          setLastDetected(detectedVisitors[0] || null); // Context 상태 업데이트
-          setVisitors(detectedVisitors); // Context 상태 업데이트
+          setHasElderlyVisitor(foundElderly);
+          setLastDetected(detectedVisitors[0] || null);
+          setVisitors(detectedVisitors);
 
-          // --- 노인 과반수 그룹 여부 계산 및 Context에 저장 ---
           const elderlyCount = detectedVisitors.filter(v => v.age >= 45).length;
           const isElderlyMajority = detectedVisitors.length > 0 && elderlyCount / detectedVisitors.length >= 0.5;
           if (typeof setIsElderlyMajorityGroup === 'function') setIsElderlyMajorityGroup(isElderlyMajority);
         } else {
-          setHasElderlyVisitor(false); // Context 상태 업데이트
-          setVisitors([]); // Context 상태 업데이트
-          setLastDetected({ age: '감지 실패', gender: '-', expressions: 'N/A' }); // Context 상태 업데이트
+          setHasElderlyVisitor(false);
+          setVisitors([]);
+          setLastDetected({ age: '감지 실패', gender: '-', expressions: 'N/A' });
         }
 
-        setRecognitionDone(true); // Context 상태 업데이트
+        setRecognitionDone(true);
         if (DEBUG_MODE) setShowDebugInfo(true); 
       };
 
@@ -252,7 +266,19 @@ const LogoAnimation = () => {
       
       return () => clearTimeout(timer1);
     }
-  }, [recognitionDone]); 
+  }, [recognitionDone]);
+
+  // --- 3. (추가) 인식이 완료되면 2.5초 후 추천 페이지로 이동 ---
+  useEffect(() => {
+    if (recognitionDone) {
+      const navigationTimer = setTimeout(() => {
+        navigate('/recommendation');
+      }, 2500); // 2.5초 대기 후 페이지 이동
+
+      // 컴포넌트가 언마운트될 경우 타이머를 정리합니다.
+      return () => clearTimeout(navigationTimer);
+    }
+  }, [recognitionDone, navigate]); // recognitionDone과 navigate가 변경될 때마다 이 효과를 재실행
 
   // 얼굴 박스 너비로 거리 추정 함수
   const calculateDistance = (boxWidth) => {
@@ -283,7 +309,6 @@ const LogoAnimation = () => {
         setShowWelcomeSvg(false); 
         setShowRecognitionText(false); 
         
-        // --- Context의 초기화 함수 호출 ---
         resetRecognitionState(); 
       }
     };
@@ -293,7 +318,7 @@ const LogoAnimation = () => {
     return () => {
       window.removeEventListener('keydown', handleKeyPress);
     };
-  }, [resetRecognitionState]); // resetRecognitionState를 의존성 배열에 추가
+  }, [resetRecognitionState]);
 
   // --- 로고 스타일 계산 ---
   const logoStyle = {
@@ -336,31 +361,8 @@ const LogoAnimation = () => {
   return (
     <div style={{ padding: '40px', textAlign: 'center', position: 'relative', width: '100vw', height: '100vh', display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', overflow: 'hidden' }}>
 
-      {/* 웹캠 비디오 및 캔버스 (DEBUG_MODE에 따라 표시) */}
-      <div style={{
-        position: 'absolute',
-        top: 0,
-        left: 0,
-        overflow: 'hidden',
-        zIndex: DEBUG_MODE ? 10 : -1,
-        width: DEBUG_MODE ? '320px' : '1px',
-        height: DEBUG_MODE ? '240px' : '1px',
-        opacity: DEBUG_MODE ? 1 : 0
-      }}>
-        <video
-          ref={videoRef}
-          onLoadedMetadata={handleVideoLoadedMetadata}
-          autoPlay
-          muted
-          width="320" 
-          height="240"
-          style={{
-            position: 'absolute',
-            top: 0,
-            left: 0,
-          }}
-        />
-        <canvas
+      {/* 캔버스 (얼굴 인식을 위해 필요하지만 보이지 않게 처리) */}
+      <canvas
           ref={canvasRef}
           width="320"
           height="240"
@@ -368,9 +370,12 @@ const LogoAnimation = () => {
             position: 'absolute',
             top: 0,
             left: 0,
+            opacity: DEBUG_MODE ? 1 : 0,
+            zIndex: DEBUG_MODE ? 10 : -1,
+            width: DEBUG_MODE ? '320px' : '1px',
+            height: DEBUG_MODE ? '240px' : '1px',
           }}
         />
-      </div>
 
       {/* 로고 */}
       <img

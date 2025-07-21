@@ -1,7 +1,7 @@
 #root {
   max-width: 1280px;
   margin: 0 auto;
-  padding: 2rem;
+  padding: 0rem;
   text-align: center;
 }
 
@@ -39,4 +39,10 @@
 
 .read-the-docs {
   color: #888;
+}
+
+.app-container {
+  width: 100%;
+  min-height: 100vh;
+  background-image: linear-gradient(to bottom, #eef2f3, #dbe9e9);
 }
