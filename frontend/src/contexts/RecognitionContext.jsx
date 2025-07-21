@@ -11,6 +11,7 @@ export const RecognitionProvider = ({ children }) => {
   const [visitors, setVisitors] = useState([]);
   const [hasElderlyVisitor, setHasElderlyVisitor] = useState(false);
   const [lastDetected, setLastDetected] = useState(null);
+  const [isElderlyMajorityGroup, setIsElderlyMajorityGroup] = useState(false);
   // 필요하다면 TTS 관련 상태도 이곳으로 옮겨올 수 있습니다.
 
   // 초기화 함수 (R 키와 동일한 기능)
@@ -19,6 +20,7 @@ export const RecognitionProvider = ({ children }) => {
     setVisitors([]);
     setHasElderlyVisitor(false);
     setLastDetected(null);
+    setIsElderlyMajorityGroup(false);
   };
 
   const value = {
@@ -26,6 +28,7 @@ export const RecognitionProvider = ({ children }) => {
     visitors, setVisitors,
     hasElderlyVisitor, setHasElderlyVisitor,
     lastDetected, setLastDetected,
+    isElderlyMajorityGroup, setIsElderlyMajorityGroup,
     resetRecognitionState, // 초기화 함수도 제공
   };
 

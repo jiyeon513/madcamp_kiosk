@@ -12,7 +12,8 @@ const LogoAnimation = () => {
     visitors, setVisitors,
     hasElderlyVisitor, setHasElderlyVisitor,
     lastDetected, setLastDetected,
-    resetRecognitionState // 초기화 함수도 가져옴
+    resetRecognitionState, // 초기화 함수도 가져옴
+    setIsElderlyMajorityGroup // 노인 과반수 그룹 상태 업데이트 함수도 가져옴
   } = useRecognition();
 
   const videoRef = useRef();
@@ -199,6 +200,11 @@ const LogoAnimation = () => {
           setHasElderlyVisitor(foundElderly); // Context 상태 업데이트
           setLastDetected(detectedVisitors[0] || null); // Context 상태 업데이트
           setVisitors(detectedVisitors); // Context 상태 업데이트
+
+          // --- 노인 과반수 그룹 여부 계산 및 Context에 저장 ---
+          const elderlyCount = detectedVisitors.filter(v => v.age >= 45).length;
+          const isElderlyMajority = detectedVisitors.length > 0 && elderlyCount / detectedVisitors.length >= 0.5;
+          if (typeof setIsElderlyMajorityGroup === 'function') setIsElderlyMajorityGroup(isElderlyMajority);
         } else {
           setHasElderlyVisitor(false); // Context 상태 업데이트
           setVisitors([]); // Context 상태 업데이트
@@ -211,7 +217,7 @@ const LogoAnimation = () => {
 
       setTimeout(detectAndSaveVisitorsWithExpressions, 500);
     }
-  }, [isShrunk, recognitionDone, DEBUG_MODE, setRecognitionDone, setHasElderlyVisitor, setLastDetected, setVisitors]);
+  }, [isShrunk, recognitionDone, DEBUG_MODE, setRecognitionDone, setHasElderlyVisitor, setLastDetected, setVisitors, setIsElderlyMajorityGroup]);
 
 
   // --- recognitionDone이 true가 되면 "반가워요!" SVG 및 멘트 표시 ---
