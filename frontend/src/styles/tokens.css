@@ -1,0 +1,15 @@
+:root {
+    /* 네가 메모했던 3가지 색 (예: 값은 너의 것로 그대로) */
+    --color-c1: #006A3F;
+    --color-c2: #D4B18B;
+    --color-c3: #FAEAD8;
+  
+    /* 그라데이션 (퍼센트 네 기록대로 조정) */
+    --grad-main: linear-gradient(
+      180deg,
+      var(--color-c1) 0%,
+      var(--color-c2) 56%,
+      var(--color-c3) 87%
+    );
+  }
+  
